@@ -22,7 +22,7 @@ from asyncpg import Record
 from attr import dataclass
 import attr
 
-from mautrix.types import RoomID, UserID
+from mautrix.types import ContentURI, RoomID, UserID
 from mautrix.util.async_db import Database, Scheme
 
 
@@ -34,6 +34,8 @@ class Subscription:
     notification_template: Template
     send_notice: bool
     title_exclude_filter: str
+    profile_displayname: str
+    profile_avatar_url: str
 
     @classmethod
     def from_row(cls, row: Record | None) -> Subscription | None:
@@ -47,6 +49,8 @@ class Subscription:
         send_notice = bool(row["send_notice"])
         tpl = Template(row["notification_template"])
         title_exclude_filter = row["title_exclude_filter"]
+        profile_displayname = row["profile_displayname"] or ""
+        profile_avatar_url = row["profile_avatar_url"] or ""
         return cls(
             feed_id=feed_id,
             room_id=room_id,
@@ -54,6 +58,8 @@ class Subscription:
             notification_template=tpl,
             send_notice=send_notice,
             title_exclude_filter=title_exclude_filter,
+            profile_displayname=profile_displayname,
+            profile_avatar_url=profile_avatar_url,
         )
 
 
@@ -64,6 +70,7 @@ class Feed:
     title: str
     subtitle: str
     link: str
+    icon_url: str = ""
 
     next_retry: int = 0
     error_count: int = 0
@@ -80,7 +87,23 @@ class Feed:
         data.pop("send_notice", None)
         data.pop("notification_template", None)
         data.pop("title_exclude_filter", None)
+        data.pop("profile_displayname", None)
+        data.pop("profile_avatar_url", None)
+        if data.get("icon_url") is None:
+            data["icon_url"] = ""
         return cls(**data, subscriptions=[])
+
+
+@dataclass(frozen=True)
+class Avatar:
+    url: str
+    mxc: ContentURI
+
+    @classmethod
+    def from_row(cls, row: Record | None) -> Avatar | None:
+        if not row:
+            return None
+        return cls(url=row["url"], mxc=row["mxc"])
 
 
 date_fmt = "%Y-%m-%d %H:%M:%S"
@@ -122,8 +145,9 @@ class DBManager:
 
     async def get_feeds(self) -> list[Feed]:
         q = """
-        SELECT id, url, title, subtitle, link, next_retry, error_count,
-               room_id, user_id, notification_template, send_notice, title_exclude_filter
+        SELECT id, url, title, subtitle, link, icon_url, next_retry, error_count,
+               room_id, user_id, notification_template, send_notice, title_exclude_filter,
+               profile_displayname, profile_avatar_url
         FROM feed INNER JOIN subscription ON feed.id = subscription.feed_id
         """
         rows = await self.db.fetch(q)
@@ -138,8 +162,9 @@ class DBManager:
 
     async def get_feeds_by_room(self, room_id: RoomID) -> list[tuple[Feed, UserID, str]]:
         q = """
-        SELECT id, url, title, subtitle, link, next_retry, error_count, user_id, title_exclude_filter FROM feed
-        INNER JOIN subscription ON feed.id = subscription.feed_id AND subscription.room_id = $1
+        SELECT id, url, title, subtitle, link, icon_url, next_retry, error_count,
+               user_id, title_exclude_filter
+        FROM feed INNER JOIN subscription ON feed.id = subscription.feed_id AND subscription.room_id = $1
         """
         rows = await self.db.fetch(q, room_id)
         return [(Feed.from_row(row), row["user_id"], row["title_exclude_filter"]) for row in rows]
@@ -177,15 +202,19 @@ class DBManager:
                 await conn.executemany(q, records)
 
     async def get_feed_by_url(self, url: str) -> Feed | None:
-        q = "SELECT id, url, title, subtitle, link, next_retry, error_count FROM feed WHERE url=$1"
+        q = """
+        SELECT id, url, title, subtitle, link, icon_url, next_retry, error_count
+        FROM feed WHERE url=$1
+        """
         return Feed.from_row(await self.db.fetchrow(q, url))
 
     async def get_subscription(
         self, feed_id: int, room_id: RoomID
     ) -> tuple[Subscription | None, Feed | None]:
         q = """
-        SELECT id, url, title, subtitle, link, next_retry, error_count,
-               room_id, user_id, notification_template, send_notice, title_exclude_filter
+        SELECT id, url, title, subtitle, link, icon_url, next_retry, error_count,
+               room_id, user_id, notification_template, send_notice, title_exclude_filter,
+               profile_displayname, profile_avatar_url
         FROM feed LEFT JOIN subscription ON feed.id = subscription.feed_id AND room_id = $2
         WHERE feed.id = $1
         """
@@ -197,11 +226,11 @@ class DBManager:
 
     async def create_feed(self, info: Feed) -> Feed:
         q = (
-            "INSERT INTO feed (url, title, subtitle, link, next_retry) "
-            "VALUES ($1, $2, $3, $4, $5) RETURNING (id)"
+            "INSERT INTO feed (url, title, subtitle, link, icon_url, next_retry) "
+            "VALUES ($1, $2, $3, $4, $5, $6) RETURNING (id)"
         )
         info.id = await self.db.fetchval(
-            q, info.url, info.title, info.subtitle, info.link, info.next_retry
+            q, info.url, info.title, info.subtitle, info.link, info.icon_url, info.next_retry
         )
         return info
 
@@ -241,3 +270,20 @@ class DBManager:
     ) -> None:
         q = "UPDATE subscription SET title_exclude_filter=$3 WHERE feed_id=$1 AND room_id=$2"
         await self.db.execute(q, feed_id, room_id, title_exclude_filter)
+
+    async def update_profile(
+        self, feed_id: int, room_id: RoomID, displayname: str, avatar_url: str
+    ) -> None:
+        q = """
+        UPDATE subscription SET profile_displayname=$3, profile_avatar_url=$4
+        WHERE feed_id=$1 AND room_id=$2
+        """
+        await self.db.execute(q, feed_id, room_id, displayname, avatar_url)
+
+    async def get_avatars(self) -> list[Avatar]:
+        rows = await self.db.fetch("SELECT url, mxc FROM avatar")
+        return [Avatar.from_row(row) for row in rows]
+
+    async def put_avatar(self, url: str, mxc: ContentURI) -> None:
+        q = "INSERT INTO avatar (url, mxc) VALUES ($1, $2) ON CONFLICT (url) DO NOTHING"
+        await self.db.execute(q, url, mxc)

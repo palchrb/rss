@@ -31,17 +31,21 @@ import feedparser
 
 from maubot import MessageEvent, Plugin, __version__ as maubot_version
 from maubot.handlers import command, event
+from maubot.matrix import parse_formatted
 from mautrix.types import (
     EventID,
     EventType,
+    Format,
     MessageType,
     PowerLevelStateEventContent,
     RoomID,
     StateEvent,
+    TextMessageEventContent,
 )
 from mautrix.util.async_db import UpgradeTable
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
+from .avatar_manager import AvatarManager
 from .db import DBManager, Entry, Feed, Subscription
 from .migrations import upgrade_table
 
@@ -77,6 +81,7 @@ class BoolArgument(command.Argument):
 
 class RSSBot(Plugin):
     dbm: DBManager
+    avatars: AvatarManager
     poll_task: asyncio.Future
     poll_sema: asyncio.Semaphore | None
     http: aiohttp.ClientSession
@@ -95,6 +100,8 @@ class RSSBot(Plugin):
         self.on_external_config_update()
         self.dbm = DBManager(self.database)
         self.http = self.client.api.session
+        self.avatars = AvatarManager(self)
+        await self.avatars.load_db()
         self.power_level_cache = {}
         self.poll_task = asyncio.create_task(self.poll_feeds())
 
@@ -132,11 +139,38 @@ class RSSBot(Plugin):
         )
         msgtype = MessageType.NOTICE if sub.send_notice else MessageType.TEXT
         try:
-            return await self.client.send_markdown(
-                sub.room_id, message, msgtype=msgtype, allow_html=True
-            )
+            content = TextMessageEventContent(msgtype=msgtype, format=Format.HTML)
+            content.body, content.formatted_body = await parse_formatted(message, allow_html=True)
+            content["com.beeper.per_message_profile"] = await self._get_profile(feed, sub)
+            return await self.client.send_message(sub.room_id, content)
         except Exception as e:
             self.log.warning(f"Failed to send {entry.id} of {feed.id} to {sub.room_id}: {e}")
+
+    async def _get_profile(self, feed: Feed, sub: Subscription) -> dict[str, str]:
+        profile = {
+            "id": str(feed.id),
+            "displayname": sub.profile_displayname or feed.title,
+        }
+        avatar_url = sub.profile_avatar_url
+        if not avatar_url and feed.icon_url:
+            try:
+                avatar_url = await self.avatars.get_mxc(feed.icon_url)
+            except Exception:
+                self.log.warning(f"Failed to get avatar for {feed.id}", exc_info=True)
+        if avatar_url:
+            profile["avatar_url"] = avatar_url
+        return profile
+
+    async def _send_sample(self, feed: Feed, sub: Subscription) -> None:
+        sample_entry = Entry(
+            feed_id=feed.id,
+            id="SAMPLE",
+            date=datetime.now(timezone.utc),
+            title="Sample entry",
+            summary="This is a sample entry to demonstrate your new template",
+            link="http://example.com",
+        )
+        await self._send(feed, sample_entry, sub)
 
     async def _broadcast(
         self, feed: Feed, entry: Entry, subscriptions: list[Subscription]
@@ -261,6 +295,7 @@ class RSSBot(Plugin):
         feed.title = content["title"]
         feed.subtitle = content.get("subtitle", "")
         feed.link = content.get("home_page_url", "")
+        feed.icon_url = content.get("icon") or content.get("favicon") or ""
         return feed, [cls._parse_json_entry(feed.id, entry) for entry in content["items"]]
 
     @classmethod
@@ -291,6 +326,8 @@ class RSSBot(Plugin):
         feed.title = feed_data.get("title", feed.url)
         feed.subtitle = feed_data.get("description", "")
         feed.link = feed_data.get("link", "")
+        image = feed_data.get("image") or {}
+        feed.icon_url = feed_data.get("icon") or image.get("href") or feed_data.get("logo") or ""
         return feed, [cls._parse_rss_entry(feed.id, entry) for entry in parsed_data.entries]
 
     @classmethod
@@ -463,23 +500,55 @@ class RSSBot(Plugin):
             )
             return
         await self.dbm.update_template(feed.id, evt.room_id, template)
-        sub = Subscription(
-            feed_id=feed.id,
-            room_id=sub.room_id,
-            user_id=sub.user_id,
-            notification_template=Template(template),
-            send_notice=sub.send_notice,
-        )
-        sample_entry = Entry(
-            feed_id=feed.id,
-            id="SAMPLE",
-            date=datetime.now(timezone.utc),
-            title="Sample entry",
-            summary="This is a sample entry to demonstrate your new template",
-            link="http://example.com",
-        )
+        sub = attr.evolve(sub, notification_template=Template(template))
         await evt.reply(f"Template for feed ID {feed.id} updated. Sample notification:")
-        await self._send(feed, sample_entry, sub)
+        await self._send_sample(feed, sub)
+
+    @staticmethod
+    def _parse_profile(profile: str) -> tuple[str, str]:
+        displayname, _, last = profile.strip().rpartition(" ")
+        if last.startswith("mxc://"):
+            return displayname.strip(), last
+        return profile.strip(), ""
+
+    @rss.subcommand(
+        "profile",
+        aliases=("p",),
+        help="Change the per-message profile (display name and avatar) for a subscription",
+    )
+    @command.argument("feed_id", "feed ID", parser=int)
+    @command.argument(
+        "profile", "display name and/or mxc:// avatar URL", pass_raw=True, required=False
+    )
+    async def command_profile(self, evt: MessageEvent, feed_id: int, profile: str) -> None:
+        if not await self.can_manage(evt):
+            return
+        sub, feed = await self.dbm.get_subscription(feed_id, evt.room_id)
+        if not sub:
+            await evt.reply("This room is not subscribed to that feed")
+            return
+        if not profile:
+            displayname = sub.profile_displayname or f"{feed.title} (from feed)"
+            if sub.profile_avatar_url:
+                avatar = sub.profile_avatar_url
+            elif feed.icon_url:
+                avatar = f"{feed.icon_url} (from feed)"
+            else:
+                avatar = "none"
+            await evt.reply(
+                f"Per-message profile for feed ID {feed.id} in this room:\n\n"
+                f"* Display name: {displayname}\n"
+                f"* Avatar: {avatar}"
+            )
+            return
+        if profile.strip() == "reset":
+            displayname, avatar_url = "", ""
+        else:
+            displayname, avatar_url = self._parse_profile(profile)
+        await self.dbm.update_profile(feed.id, evt.room_id, displayname, avatar_url)
+        sub = attr.evolve(sub, profile_displayname=displayname, profile_avatar_url=avatar_url)
+        await evt.reply(f"Per-message profile for feed ID {feed.id} updated. Sample notification:")
+        await self._send_sample(feed, sub)
 
     @rss.subcommand(
         "notice", aliases=("n",), help="Set whether or not the bot should send updates as m.notice"

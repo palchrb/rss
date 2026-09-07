@@ -18,7 +18,7 @@ from mautrix.util.async_db import Connection, Scheme, UpgradeTable
 upgrade_table = UpgradeTable()
 
 
-@upgrade_table.register(description="Latest revision", upgrades_to=5)
+@upgrade_table.register(description="Latest revision", upgrades_to=6)
 async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
     gen = "GENERATED ALWAYS AS IDENTITY" if scheme != Scheme.SQLITE else ""
     await conn.execute(f"""
@@ -28,6 +28,7 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             title    TEXT NOT NULL,
             subtitle TEXT NOT NULL,
             link     TEXT NOT NULL,
+            icon_url TEXT DEFAULT '',
 
             next_retry  BIGINT DEFAULT 0,
             error_count BIGINT DEFAULT 0,
@@ -45,6 +46,8 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             notification_template TEXT,
             send_notice           BOOLEAN DEFAULT true,
             title_exclude_filter  TEXT DEFAULT '',
+            profile_displayname   TEXT DEFAULT '',
+            profile_avatar_url    TEXT DEFAULT '',
 
             PRIMARY KEY (feed_id, room_id),
             FOREIGN KEY (feed_id) REFERENCES feed (id)
@@ -60,6 +63,13 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
             link    TEXT NOT NULL,
             PRIMARY KEY (feed_id, id),
             FOREIGN KEY (feed_id) REFERENCES feed (id)
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS avatar (
+            url TEXT NOT NULL,
+            mxc TEXT NOT NULL,
+            PRIMARY KEY (url)
         )
     """)
 
@@ -84,3 +94,17 @@ async def upgrade_v4(conn: Connection, scheme: Scheme) -> None:
 @upgrade_table.register(description="Add title exclude filter to subscriptions")
 async def upgrade_v5(conn: Connection) -> None:
     await conn.execute("ALTER TABLE subscription ADD COLUMN title_exclude_filter TEXT DEFAULT ''")
+
+
+@upgrade_table.register(description="Add per-message profiles to subscriptions")
+async def upgrade_v6(conn: Connection) -> None:
+    await conn.execute("ALTER TABLE feed ADD COLUMN icon_url TEXT DEFAULT ''")
+    await conn.execute("ALTER TABLE subscription ADD COLUMN profile_displayname TEXT DEFAULT ''")
+    await conn.execute("ALTER TABLE subscription ADD COLUMN profile_avatar_url TEXT DEFAULT ''")
+    await conn.execute("""
+        CREATE TABLE avatar (
+            url TEXT NOT NULL,
+            mxc TEXT NOT NULL,
+            PRIMARY KEY (url)
+        )
+    """)
