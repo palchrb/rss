@@ -15,6 +15,12 @@ notification_template: "New post in $feed_title: [$title]($link)"
 # Should non-admin users be allowed to set regex filters to drop posts from feeds?
 # Regexes are dangerous and may lead to DoS attacks.
 allow_filter: false
+# URL template used to look up an avatar for feeds that don't provide an icon themselves.
+# {domain} is replaced with the hostname of the feed's home page. The image is uploaded to
+# the homeserver once and used as the per-message profile avatar for the feed.
+# Set to an empty string to disable. Note that this sends the domain of every feed without
+# an icon to the service (Google by default).
+favicon_service_url: "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://{domain}&size=256"
 # Users who can bypass room permission checks
 admins:
 - "@user:example.com"

@@ -21,10 +21,12 @@ Basic commands:
 Posts are sent with a per-message profile ([MSC4144], unstable field
 `com.beeper.per_message_profile`), so clients that support it show the feed's
 title as the sender name and the feed's icon (RSS `<image>`, Atom `<icon>`, or
-JSON Feed `icon`) as the avatar. Feed icons are uploaded to the homeserver
-once and cached in the `avatar` table. Both fields can be overridden per
-subscription with `!rss profile`; the avatar override must be an `mxc://` URI.
-Clients without support show the post exactly as before.
+JSON Feed `icon`) as the avatar. Feeds that don't provide an icon get one
+from a favicon lookup service instead (`favicon_service_url` in the config,
+Google by default; set it to an empty string to disable). Icons are uploaded
+to the homeserver once and cached in the `avatar` table. Both fields can be
+overridden per subscription with `!rss profile`; the avatar override must be
+an `mxc://` URI. Clients without support show the post exactly as before.
 
 [MSC4144]: https://github.com/matrix-org/matrix-spec-proposals/pull/4144
 

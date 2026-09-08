@@ -19,6 +19,7 @@ from typing import Any, Iterable
 from datetime import datetime, timezone
 from string import Template
 from time import mktime, monotonic, time
+from urllib.parse import urlparse
 import asyncio
 import hashlib
 import html
@@ -61,6 +62,7 @@ class Config(BaseProxyConfig):
         helper.copy("command_prefix")
         helper.copy("notification_template")
         helper.copy("allow_filter")
+        helper.copy("favicon_service_url")
         helper.copy("admins")
 
 
@@ -152,14 +154,28 @@ class RSSBot(Plugin):
             "displayname": sub.profile_displayname or feed.title,
         }
         avatar_url = sub.profile_avatar_url
-        if not avatar_url and feed.icon_url:
-            try:
-                avatar_url = await self.avatars.get_mxc(feed.icon_url)
-            except Exception:
-                self.log.warning(f"Failed to get avatar for {feed.id}", exc_info=True)
+        if not avatar_url:
+            icon_url = feed.icon_url or self._favicon_url(feed)
+            if icon_url:
+                try:
+                    avatar_url = await self.avatars.get_mxc(icon_url)
+                except Exception:
+                    self.log.warning(f"Failed to get avatar for {feed.id}", exc_info=True)
         if avatar_url:
             profile["avatar_url"] = avatar_url
         return profile
+
+    def _favicon_url(self, feed: Feed) -> str:
+        template = self.config["favicon_service_url"]
+        if not template:
+            return ""
+        for url in (feed.link, feed.url):
+            domain = urlparse(url).hostname if url else None
+            if domain:
+                if domain.startswith("www."):
+                    domain = domain[4:]
+                return template.replace("{domain}", domain)
+        return ""
 
     async def _send_sample(self, feed: Feed, sub: Subscription) -> None:
         sample_entry = Entry(
@@ -533,6 +549,8 @@ class RSSBot(Plugin):
                 avatar = sub.profile_avatar_url
             elif feed.icon_url:
                 avatar = f"{feed.icon_url} (from feed)"
+            elif self._favicon_url(feed):
+                avatar = f"{self._favicon_url(feed)} (from favicon service)"
             else:
                 avatar = "none"
             await evt.reply(
