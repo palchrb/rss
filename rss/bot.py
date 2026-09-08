@@ -155,27 +155,36 @@ class RSSBot(Plugin):
         }
         avatar_url = sub.profile_avatar_url
         if not avatar_url:
-            icon_url = feed.icon_url or self._favicon_url(feed)
-            if icon_url:
+            candidates = [feed.icon_url] if feed.icon_url else self._favicon_urls(feed)
+            for url in candidates:
                 try:
-                    avatar_url = await self.avatars.get_mxc(icon_url)
-                except Exception:
-                    self.log.warning(f"Failed to get avatar for {feed.id}", exc_info=True)
+                    avatar_url = await self.avatars.get_mxc(url)
+                    break
+                except Exception as e:
+                    log = self.log.warning if url == feed.icon_url else self.log.debug
+                    log(f"Failed to get avatar for {feed.id} from {url}: {e}")
         if avatar_url:
             profile["avatar_url"] = avatar_url
         return profile
 
-    def _favicon_url(self, feed: Feed) -> str:
+    def _favicon_urls(self, feed: Feed) -> list[str]:
         template = self.config["favicon_service_url"]
         if not template:
-            return ""
+            return []
         for url in (feed.link, feed.url):
             domain = urlparse(url).hostname if url else None
-            if domain:
-                if domain.startswith("www."):
-                    domain = domain[4:]
-                return template.replace("{domain}", domain)
-        return ""
+            if not domain:
+                continue
+            if domain.startswith("www."):
+                domain = domain[4:]
+            labels = domain.split(".")
+            if labels[-1].isdigit():
+                domains = [domain]
+            else:
+                # The host itself first, then its parent domains (rss.example.com -> example.com)
+                domains = [".".join(labels[i:]) for i in range(max(len(labels) - 1, 1))]
+            return [template.replace("{domain}", d) for d in domains]
+        return []
 
     async def _send_sample(self, feed: Feed, sub: Subscription) -> None:
         sample_entry = Entry(
@@ -549,8 +558,8 @@ class RSSBot(Plugin):
                 avatar = sub.profile_avatar_url
             elif feed.icon_url:
                 avatar = f"{feed.icon_url} (from feed)"
-            elif self._favicon_url(feed):
-                avatar = f"{self._favicon_url(feed)} (from favicon service)"
+            elif self._favicon_urls(feed):
+                avatar = f"{self._favicon_urls(feed)[0]} (from favicon service)"
             else:
                 avatar = "none"
             await evt.reply(

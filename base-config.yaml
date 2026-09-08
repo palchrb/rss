@@ -16,11 +16,13 @@ notification_template: "New post in $feed_title: [$title]($link)"
 # Regexes are dangerous and may lead to DoS attacks.
 allow_filter: false
 # URL template used to look up an avatar for feeds that don't provide an icon themselves.
-# {domain} is replaced with the hostname of the feed's home page. The image is uploaded to
-# the homeserver once and used as the per-message profile avatar for the feed.
+# {domain} is replaced with the hostname of the feed's home page; if that gives no result,
+# the parent domains are tried too (rss.example.com -> example.com). The service must respond
+# with an error (e.g. 404) when it has no icon, otherwise a placeholder image would be used.
+# The image is uploaded to the homeserver once and used as the per-message profile avatar.
 # Set to an empty string to disable. Note that this sends the domain of every feed without
 # an icon to the service (Google by default).
-favicon_service_url: "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://{domain}&size=256"
+favicon_service_url: "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE&url=http://{domain}&size=256"
 # Users who can bypass room permission checks
 admins:
 - "@user:example.com"

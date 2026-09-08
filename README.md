@@ -23,7 +23,8 @@ Posts are sent with a per-message profile ([MSC4144], unstable field
 title as the sender name and the feed's icon (RSS `<image>`, Atom `<icon>`, or
 JSON Feed `icon`) as the avatar. Feeds that don't provide an icon get one
 from a favicon lookup service instead (`favicon_service_url` in the config,
-Google by default; set it to an empty string to disable). Icons are uploaded
+Google by default; set it to an empty string to disable). The lookup uses the
+hostname of the feed's home page and falls back to its parent domains. Icons are uploaded
 to the homeserver once and cached in the `avatar` table. Both fields can be
 overridden per subscription with `!rss profile`; the avatar override must be
 an `mxc://` URI. Clients without support show the post exactly as before.
