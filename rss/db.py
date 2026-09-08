@@ -98,12 +98,19 @@ class Feed:
 class Avatar:
     url: str
     mxc: ContentURI
+    content_hash: str = ""
+    fetched_at: int = 0
 
     @classmethod
     def from_row(cls, row: Record | None) -> Avatar | None:
         if not row:
             return None
-        return cls(url=row["url"], mxc=row["mxc"])
+        return cls(
+            url=row["url"],
+            mxc=row["mxc"],
+            content_hash=row["content_hash"] or "",
+            fetched_at=row["fetched_at"] or 0,
+        )
 
 
 date_fmt = "%Y-%m-%d %H:%M:%S"
@@ -281,9 +288,13 @@ class DBManager:
         await self.db.execute(q, feed_id, room_id, displayname, avatar_url)
 
     async def get_avatars(self) -> list[Avatar]:
-        rows = await self.db.fetch("SELECT url, mxc FROM avatar")
+        rows = await self.db.fetch("SELECT url, mxc, content_hash, fetched_at FROM avatar")
         return [Avatar.from_row(row) for row in rows]
 
-    async def put_avatar(self, url: str, mxc: ContentURI) -> None:
-        q = "INSERT INTO avatar (url, mxc) VALUES ($1, $2) ON CONFLICT (url) DO NOTHING"
-        await self.db.execute(q, url, mxc)
+    async def put_avatar(self, avatar: Avatar) -> None:
+        q = """
+        INSERT INTO avatar (url, mxc, content_hash, fetched_at) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (url) DO UPDATE
+            SET mxc=excluded.mxc, content_hash=excluded.content_hash, fetched_at=excluded.fetched_at
+        """
+        await self.db.execute(q, avatar.url, avatar.mxc, avatar.content_hash, avatar.fetched_at)

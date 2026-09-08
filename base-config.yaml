@@ -23,6 +23,11 @@ allow_filter: false
 # Set to an empty string to disable. Note that this sends the domain of every feed without
 # an icon to the service (Google by default).
 favicon_service_url: "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE&url=http://{domain}&size=256"
+# How often (in days) to re-check feed icons and favicon lookups for changes. An icon is only
+# re-uploaded when the image actually changed, and a lookup that found no icon is retried after
+# the same period. Set to 0 to never re-check: icons are then kept forever and lookups that
+# found nothing are retried on every post.
+avatar_refresh_days: 30
 # Users who can bypass room permission checks
 admins:
 - "@user:example.com"

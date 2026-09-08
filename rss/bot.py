@@ -63,6 +63,7 @@ class Config(BaseProxyConfig):
         helper.copy("notification_template")
         helper.copy("allow_filter")
         helper.copy("favicon_service_url")
+        helper.copy("avatar_refresh_days")
         helper.copy("admins")
 
 
@@ -159,10 +160,12 @@ class RSSBot(Plugin):
             for url in candidates:
                 try:
                     avatar_url = await self.avatars.get_mxc(url)
-                    break
                 except Exception as e:
                     log = self.log.warning if url == feed.icon_url else self.log.debug
                     log(f"Failed to get avatar for {feed.id} from {url}: {e}")
+                    continue
+                if avatar_url:
+                    break
         if avatar_url:
             profile["avatar_url"] = avatar_url
         return profile
@@ -568,7 +571,7 @@ class RSSBot(Plugin):
                 f"* Avatar: {avatar}"
             )
             return
-        if profile.strip() == "reset":
+        if profile.strip() in ("reset", "clear"):
             displayname, avatar_url = "", ""
         else:
             displayname, avatar_url = self._parse_profile(profile)
