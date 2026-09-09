@@ -28,6 +28,11 @@ favicon_service_url: "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICO
 # the same period. Set to 0 to never re-check: icons are then kept forever and lookups that
 # found nothing are retried on every post.
 avatar_refresh_days: 30
+# Include the text fallback from MSC4144, i.e. prefix every post with "<display name>: " so
+# that clients without per-message profile support still show who posted. Clients with
+# support strip the prefix again. Usually unnecessary, as the default template already
+# contains the feed title.
+profile_fallback: false
 # Users who can bypass room permission checks
 admins:
 - "@user:example.com"

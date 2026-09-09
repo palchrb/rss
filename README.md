@@ -28,7 +28,9 @@ hostname of the feed's home page and falls back to its parent domains. Icons are
 to the homeserver and cached in the `avatar` table; they are re-checked every
 `avatar_refresh_days` days and only re-uploaded when the image changed. Both fields can be
 overridden per subscription with `!rss profile`; the avatar override must be
-an `mxc://` URI. Clients without support show the post exactly as before.
+an `mxc://` URI. Clients without support show the post exactly as before,
+unless `profile_fallback` is enabled in the config, which prefixes every post
+with the display name as described in the MSC.
 
 [MSC4144]: https://github.com/matrix-org/matrix-spec-proposals/pull/4144
 

@@ -64,6 +64,7 @@ class Config(BaseProxyConfig):
         helper.copy("allow_filter")
         helper.copy("favicon_service_url")
         helper.copy("avatar_refresh_days")
+        helper.copy("profile_fallback")
         helper.copy("admins")
 
 
@@ -144,12 +145,29 @@ class RSSBot(Plugin):
         try:
             content = TextMessageEventContent(msgtype=msgtype, format=Format.HTML)
             content.body, content.formatted_body = await parse_formatted(message, allow_html=True)
-            content["com.beeper.per_message_profile"] = await self._get_profile(feed, sub)
+            profile = await self._get_profile(feed, sub)
+            if self.config["profile_fallback"] and profile["displayname"]:
+                content.body, content.formatted_body = self._add_profile_fallback(
+                    content.body, content.formatted_body, profile["displayname"]
+                )
+                profile["has_fallback"] = True
+            content["com.beeper.per_message_profile"] = profile
             return await self.client.send_message(sub.room_id, content)
         except Exception as e:
             self.log.warning(f"Failed to send {entry.id} of {feed.id} to {sub.room_id}: {e}")
 
-    async def _get_profile(self, feed: Feed, sub: Subscription) -> dict[str, str]:
+    @staticmethod
+    def _add_profile_fallback(body: str, formatted_body: str, displayname: str) -> tuple[str, str]:
+        # Fallback format from MSC4144 for clients without per-message profile support
+        body = f"{displayname}: {body}"
+        prefix = f"<strong data-mx-profile-fallback>{html.escape(displayname)}: </strong>"
+        if formatted_body.startswith("<p>"):
+            formatted_body = "<p>" + prefix + formatted_body[len("<p>") :]
+        else:
+            formatted_body = prefix + formatted_body
+        return body, formatted_body
+
+    async def _get_profile(self, feed: Feed, sub: Subscription) -> dict[str, Any]:
         profile = {
             "id": str(feed.id),
             "displayname": sub.profile_displayname or feed.title,
