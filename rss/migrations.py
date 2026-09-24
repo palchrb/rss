@@ -18,7 +18,7 @@ from mautrix.util.async_db import Connection, Scheme, UpgradeTable
 upgrade_table = UpgradeTable()
 
 
-@upgrade_table.register(description="Latest revision", upgrades_to=6)
+@upgrade_table.register(description="Latest revision", upgrades_to=7)
 async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
     gen = "GENERATED ALWAYS AS IDENTITY" if scheme != Scheme.SQLITE else ""
     await conn.execute(f"""
@@ -67,8 +67,10 @@ async def upgrade_latest(conn: Connection, scheme: Scheme) -> None:
     """)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS avatar (
-            url TEXT NOT NULL,
-            mxc TEXT NOT NULL,
+            url          TEXT NOT NULL,
+            mxc          TEXT NOT NULL,
+            content_hash TEXT DEFAULT '',
+            fetched_at   BIGINT DEFAULT 0,
             PRIMARY KEY (url)
         )
     """)
@@ -108,3 +110,9 @@ async def upgrade_v6(conn: Connection) -> None:
             PRIMARY KEY (url)
         )
     """)
+
+
+@upgrade_table.register(description="Add refresh metadata to avatars")
+async def upgrade_v7(conn: Connection) -> None:
+    await conn.execute("ALTER TABLE avatar ADD COLUMN content_hash TEXT DEFAULT ''")
+    await conn.execute("ALTER TABLE avatar ADD COLUMN fetched_at BIGINT DEFAULT 0")

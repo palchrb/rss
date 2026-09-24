@@ -14,17 +14,23 @@ Basic commands:
   with the current template.
 * `!rss profile <feed ID> [display name] [mxc://avatar]` - Change the
   per-message profile for a feed in the current room. If both are omitted,
-  the bot replies with the current profile. Use `reset` to go back to the
-  feed's own title and icon.
+  the bot replies with the current profile. Use `reset` (or `clear`) to go
+  back to the feed's own title and icon.
 
 ### Per-message profiles
 Posts are sent with a per-message profile ([MSC4144], unstable field
 `com.beeper.per_message_profile`), so clients that support it show the feed's
 title as the sender name and the feed's icon (RSS `<image>`, Atom `<icon>`, or
-JSON Feed `icon`) as the avatar. Feed icons are uploaded to the homeserver
-once and cached in the `avatar` table. Both fields can be overridden per
-subscription with `!rss profile`; the avatar override must be an `mxc://` URI.
-Clients without support show the post exactly as before.
+JSON Feed `icon`) as the avatar. Feeds that don't provide an icon get one
+from a favicon lookup service instead (`favicon_service_url` in the config,
+Google by default; set it to an empty string to disable). The lookup uses the
+hostname of the feed's home page and falls back to its parent domains. Icons are uploaded
+to the homeserver and cached in the `avatar` table; they are re-checked every
+`avatar_refresh_days` days and only re-uploaded when the image changed. Both fields can be
+overridden per subscription with `!rss profile`; the avatar override must be
+an `mxc://` URI. Clients without support show the post exactly as before,
+unless `profile_fallback` is enabled in the config, which prefixes every post
+with the display name as described in the MSC.
 
 [MSC4144]: https://github.com/matrix-org/matrix-spec-proposals/pull/4144
 

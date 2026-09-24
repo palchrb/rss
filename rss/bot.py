@@ -19,6 +19,7 @@ from typing import Any, Iterable
 from datetime import datetime, timezone
 from string import Template
 from time import mktime, monotonic, time
+from urllib.parse import urlparse
 import asyncio
 import hashlib
 import html
@@ -61,6 +62,9 @@ class Config(BaseProxyConfig):
         helper.copy("command_prefix")
         helper.copy("notification_template")
         helper.copy("allow_filter")
+        helper.copy("favicon_service_url")
+        helper.copy("avatar_refresh_days")
+        helper.copy("profile_fallback")
         helper.copy("admins")
 
 
@@ -141,25 +145,67 @@ class RSSBot(Plugin):
         try:
             content = TextMessageEventContent(msgtype=msgtype, format=Format.HTML)
             content.body, content.formatted_body = await parse_formatted(message, allow_html=True)
-            content["com.beeper.per_message_profile"] = await self._get_profile(feed, sub)
+            profile = await self._get_profile(feed, sub)
+            if self.config["profile_fallback"] and profile["displayname"]:
+                content.body, content.formatted_body = self._add_profile_fallback(
+                    content.body, content.formatted_body, profile["displayname"]
+                )
+                profile["has_fallback"] = True
+            content["com.beeper.per_message_profile"] = profile
             return await self.client.send_message(sub.room_id, content)
         except Exception as e:
             self.log.warning(f"Failed to send {entry.id} of {feed.id} to {sub.room_id}: {e}")
 
-    async def _get_profile(self, feed: Feed, sub: Subscription) -> dict[str, str]:
+    @staticmethod
+    def _add_profile_fallback(body: str, formatted_body: str, displayname: str) -> tuple[str, str]:
+        # Fallback format from MSC4144 for clients without per-message profile support
+        body = f"{displayname}: {body}"
+        prefix = f"<strong data-mx-profile-fallback>{html.escape(displayname)}: </strong>"
+        if formatted_body.startswith("<p>"):
+            formatted_body = "<p>" + prefix + formatted_body[len("<p>") :]
+        else:
+            formatted_body = prefix + formatted_body
+        return body, formatted_body
+
+    async def _get_profile(self, feed: Feed, sub: Subscription) -> dict[str, Any]:
         profile = {
             "id": str(feed.id),
             "displayname": sub.profile_displayname or feed.title,
         }
         avatar_url = sub.profile_avatar_url
-        if not avatar_url and feed.icon_url:
-            try:
-                avatar_url = await self.avatars.get_mxc(feed.icon_url)
-            except Exception:
-                self.log.warning(f"Failed to get avatar for {feed.id}", exc_info=True)
+        if not avatar_url:
+            candidates = [feed.icon_url] if feed.icon_url else self._favicon_urls(feed)
+            for url in candidates:
+                try:
+                    avatar_url = await self.avatars.get_mxc(url)
+                except Exception as e:
+                    log = self.log.warning if url == feed.icon_url else self.log.debug
+                    log(f"Failed to get avatar for {feed.id} from {url}: {e}")
+                    continue
+                if avatar_url:
+                    break
         if avatar_url:
             profile["avatar_url"] = avatar_url
         return profile
+
+    def _favicon_urls(self, feed: Feed) -> list[str]:
+        template = self.config["favicon_service_url"]
+        if not template:
+            return []
+        for url in (feed.link, feed.url):
+            domain = urlparse(url).hostname if url else None
+            if not domain:
+                continue
+            if domain.startswith("www."):
+                domain = domain[4:]
+            labels = domain.split(".")
+            if labels[-1].isdigit():
+                domains = [domain]
+            else:
+                # The host itself first, then its parent domains (rss.example.com -> example.com)
+                domains = [".".join(labels[i:]) for i in range(max(len(labels) - 1, 1))]
+            return [template.replace("{domain}", d) for d in domains]
+        return []
 
     async def _send_sample(self, feed: Feed, sub: Subscription) -> None:
         sample_entry = Entry(
@@ -533,6 +579,8 @@ class RSSBot(Plugin):
                 avatar = sub.profile_avatar_url
             elif feed.icon_url:
                 avatar = f"{feed.icon_url} (from feed)"
+            elif self._favicon_urls(feed):
+                avatar = f"{self._favicon_urls(feed)[0]} (from favicon service)"
             else:
                 avatar = "none"
             await evt.reply(
@@ -541,7 +589,7 @@ class RSSBot(Plugin):
                 f"* Avatar: {avatar}"
             )
             return
-        if profile.strip() == "reset":
+        if profile.strip() in ("reset", "clear"):
             displayname, avatar_url = "", ""
         else:
             displayname, avatar_url = self._parse_profile(profile)

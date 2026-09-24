@@ -15,6 +15,24 @@ notification_template: "New post in $feed_title: [$title]($link)"
 # Should non-admin users be allowed to set regex filters to drop posts from feeds?
 # Regexes are dangerous and may lead to DoS attacks.
 allow_filter: false
+# URL template used to look up an avatar for feeds that don't provide an icon themselves.
+# {domain} is replaced with the hostname of the feed's home page; if that gives no result,
+# the parent domains are tried too (rss.example.com -> example.com). The service must respond
+# with an error (e.g. 404) when it has no icon, otherwise a placeholder image would be used.
+# The image is uploaded to the homeserver once and used as the per-message profile avatar.
+# Set to an empty string to disable. Note that this sends the domain of every feed without
+# an icon to the service (Google by default).
+favicon_service_url: "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE&url=http://{domain}&size=256"
+# How often (in days) to re-check feed icons and favicon lookups for changes. An icon is only
+# re-uploaded when the image actually changed, and a lookup that found no icon is retried after
+# the same period. Set to 0 to never re-check: icons are then kept forever and lookups that
+# found nothing are retried on every post.
+avatar_refresh_days: 30
+# Include the text fallback from MSC4144, i.e. prefix every post with "<display name>: " so
+# that clients without per-message profile support still show who posted. Clients with
+# support strip the prefix again. Usually unnecessary, as the default template already
+# contains the feed title.
+profile_fallback: false
 # Users who can bypass room permission checks
 admins:
 - "@user:example.com"
